@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Line Fitter – linear regression</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Inter:wght@400;500&display=swap">
+<style>
+:root{--bg:#EEF3F6;--panel:#FFFFFF;--ink:#13293D;--mute:#5B6E7F;--grid:#D5E0E8;--pt:#13293D;--fit:#0E8A7B;--res:#E0A100;--line:#C5D3DE;--accent:#0E8A7B;--onaccent:#fff;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0E1A25;--panel:#15263A;--ink:#E6EEF5;--mute:#93A7B8;--grid:#233A50;--pt:#E6EEF5;--fit:#3FD1BE;--res:#F2B632;--line:#2C455D;--accent:#3FD1BE;--onaccent:#08202B}}
+:root[data-theme="dark"]{--bg:#0E1A25;--panel:#15263A;--ink:#E6EEF5;--mute:#93A7B8;--grid:#233A50;--pt:#E6EEF5;--fit:#3FD1BE;--res:#F2B632;--line:#2C455D;--accent:#3FD1BE;--onaccent:#08202B}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:20px 16px 40px}
+h1{font:700 clamp(28px,6vw,44px)/1.05 "Bricolage Grotesque",Inter,system-ui,sans-serif;margin:8px 0 6px;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0 0 20px;max-width:60ch}
+.layout{display:grid;gap:16px;grid-template-columns:1fr}
+@media(min-width:820px){.layout{grid-template-columns:1.6fr 1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+h2{font:700 17px/1.2 "Bricolage Grotesque",Inter,sans-serif;margin:0 0 8px}
+svg{width:100%;height:auto;display:block;touch-action:manipulation;cursor:crosshair}
+svg text{fill:var(--mute);font:12px Inter,system-ui,sans-serif}
+.hint{color:var(--mute);font-size:14px;margin:8px 0 0}
+textarea{width:100%;min-height:150px;resize:vertical;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:10px;font:15px/1.5 ui-monospace,Menlo,Consolas,monospace}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0}
+button,input[type=number]{font:500 15px Inter,system-ui,sans-serif;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:9px 12px;min-height:40px}
+button{cursor:pointer}
+button.primary{background:var(--accent);color:var(--onaccent);border-color:var(--accent)}
+button:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.eq{font:700 clamp(22px,5vw,30px)/1.2 "Bricolage Grotesque",Inter,sans-serif;color:var(--fit);margin:2px 0 12px;word-break:break-word}
+dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
+dt{color:var(--mute)}dd{margin:0;font-variant-numeric:tabular-nums;text-align:right}
+.err{color:#C0392B;font-size:14px;min-height:20px;margin:6px 0 0}
+label.chk{display:flex;gap:6px;align-items:center;color:var(--mute);font-size:14px;margin-top:10px}
+.stack{display:grid;gap:16px;align-content:start}
+</style>
+</head>
+<body>
+<main>
+<h1>Line Fitter</h1>
+<p class="sub">Enter x, y data, or click the chart to add points. The least-squares line updates as you go.</p>
+<div class="layout">
+  <section class="panel">
+    <svg id="plot" viewBox="0 0 600 420" role="img" aria-label="Scatter plot with regression line"></svg>
+    <p class="hint">Tap or click empty space on the chart to add a point.</p>
+  </section>
+  <div class="stack">
+    <section class="panel">
+      <h2>Data</h2>
+      <textarea id="data" spellcheck="false" aria-label="Data points, one x y pair per line" placeholder="One pair per line:&#10;1, 2.1&#10;2, 3.9&#10;3, 6.2"></textarea>
+      <div class="err" id="err" role="alert"></div>
+      <div class="row">
+        <button class="primary" id="sample">Load sample</button>
+        <button id="clear">Clear all</button>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Fitted line</h2>
+      <div class="eq" id="eq">Add at least 2 points</div>
+      <dl id="stats"></dl>
+      <label class="chk"><input type="checkbox" id="resid" checked> Show residuals</label>
+    </section>
+    <section class="panel">
+      <h2>Predict y</h2>
+      <div class="row" style="margin-top:0">
+        <input type="number" id="px" step="any" placeholder="x value" aria-label="x value to predict">
+        <button id="pbtn">Predict y</button>
+      </div>
+      <p class="hint" id="pout">Enter an x value to get the predicted y.</p>
+    </section>
+  </div>
+</div>
+</main>
+<script>
+(function(){
+var W=600,H=420,M={l:46,r:16,t:16,b:36};
+var svg=document.getElementById('plot'),ta=document.getElementById('data'),errEl=document.getElementById('err');
+var pts=[],fit=null,view=null;
+var NS='http://www.w3.org/2000/svg';
+function el(n,a,t){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(t!=null)e.textContent=t;return e}
+function fmt(v,d){if(!isFinite(v))return '–';var a=Math.abs(v);if(a!==0&&(a>=1e6||a<1e-4))return v.toExponential(3);return (+v.toPrecision(d||5)).toString()}
+function parse(){
+  var lines=ta.value.split(/\n/),out=[],bad=0;
+  lines.forEach(function(l){
+    l=l.trim();if(!l)return;
+    var p=l.split(/[\s,;\t]+/).filter(Boolean);
+    var x=parseFloat(p[0]),y=parseFloat(p[1]);
+    if(p.length!==2||!isFinite(x)||!isFinite(y)||isNaN(+p[0])||isNaN(+p[1]))bad++;else out.push({x:x,y:y});
+  });
+  errEl.textContent=bad?bad+(bad>1?' lines need':' line needs')+' exactly two numbers, like “3, 4.5”. Skipped.':'';
+  pts=out;
+}
+function regress(){
+  var n=pts.length;fit=null;if(n<2)return;
+  var sx=0,sy=0;pts.forEach(function(p){sx+=p.x;sy+=p.y});
+  var mx=sx/n,my=sy/n,sxx=0,sxy=0,syy=0;
+  pts.forEach(function(p){var dx=p.x-mx,dy=p.y-my;sxx+=dx*dx;sxy+=dx*dy;syy+=dy*dy});
+  if(sxx===0){fit={vertical:true};return}
+  var m=sxy/sxx,b=my-m*mx,sse=0;
+  pts.forEach(function(p){var e=p.y-(m*p.x+b);sse+=e*e});
+  var r2=syy===0?1:1-sse/syy,r=syy===0?NaN:sxy/Math.sqrt(sxx*syy);
+  var se=n>2?Math.sqrt(sse/(n-2)):NaN;
+  fit={m:m,b:b,r2:r2,r:r,rmse:Math.sqrt(sse/n),se:n>2?se:NaN,n:n,mx:mx,my:my};
+}
+function nice(lo,hi){
+  if(lo===hi){lo-=1;hi+=1}
+  var span=hi-lo,pad=span*.08;lo-=pad;hi+=pad;span=hi-lo;
+  var step=Math.pow(10,Math.floor(Math.log10(span/5))),f=span/5/step;
+  step*=f<1.5?1:f<3?2:f<7?5:10;
+  return{lo:Math.floor(lo/step)*step,hi:Math.ceil(hi/step)*step,step:step};
+}
+function draw(){
+  while(svg.firstChild)svg.removeChild(svg.firstChild);
+  var xs=pts.map(function(p){return p.x}),ys=pts.map(function(p){return p.y});
+  var X=xs.length?nice(Math.min.apply(0,xs),Math.max.apply(0,xs)):{lo:0,hi:10,step:2};
+  var Y=ys.length?nice(Math.min.apply(0,ys),Math.max.apply(0,ys)):{lo:0,hi:10,step:2};
+  view={X:X,Y:Y};
+  var sx=function(v){return M.l+(v-X.lo)/(X.hi-X.lo)*(W-M.l-M.r)};
+  var sy=function(v){return H-M.b-(v-Y.lo)/(Y.hi-Y.lo)*(H-M.t-M.b)};
+  var dp=Math.max(0,-Math.floor(Math.log10(X.step)));var dq=Math.max(0,-Math.floor(Math.log10(Y.step)));
+  for(var v=X.lo;v<=X.hi+X.step/2;v+=X.step){
+    svg.appendChild(el('line',{x1:sx(v),x2:sx(v),y1:M.t,y2:H-M.b,stroke:'var(--grid)','stroke-width':1}));
+    svg.appendChild(el('text',{x:sx(v),y:H-M.b+18,'text-anchor':'middle'},(+v.toFixed(dp+1)).toString()));
+  }
+  for(var w=Y.lo;w<=Y.hi+Y.step/2;w+=Y.step){
+    svg.appendChild(el('line',{x1:M.l,x2:W-M.r,y1:sy(w),y2:sy(w),stroke:'var(--grid)','stroke-width':1}));
+    svg.appendChild(el('text',{x:M.l-6,y:sy(w)+4,'text-anchor':'end'},(+w.toFixed(dq+1)).toString()));
+  }
+  svg.appendChild(el('rect',{x:M.l,y:M.t,width:W-M.l-M.r,height:H-M.t-M.b,fill:'none',stroke:'var(--line)'}));
+  var showRes=document.getElementById('resid').checked;
+  if(fit&&!fit.vertical){
+    if(showRes)pts.forEach(function(p){
+      svg.appendChild(el('line',{x1:sx(p.x),x2:sx(p.x),y1:sy(p.y),y2:sy(fit.m*p.x+fit.b),stroke:'var(--res)','stroke-width':2,opacity:.85}));
+    });
+    svg.appendChild(el('line',{x1:sx(X.lo),y1:sy(fit.m*X.lo+fit.b),x2:sx(X.hi),y2:sy(fit.m*X.hi+fit.b),stroke:'var(--fit)','stroke-width':3,'stroke-linecap':'round'}));
+  }
+  pts.forEach(function(p){svg.appendChild(el('circle',{cx:sx(p.x),cy:sy(p.y),r:5,fill:'var(--pt)',stroke:'var(--panel)','stroke-width':1.5}))});
+  // clip line to plot area
+  var cp=el('clipPath',{id:'cl'});cp.appendChild(el('rect',{x:M.l,y:M.t,width:W-M.l-M.r,height:H-M.t-M.b}));svg.insertBefore(cp,svg.firstChild);
+  svg.querySelectorAll('line[stroke-linecap]').forEach(function(l){l.setAttribute('clip-path','url(#cl)')});
+}
+function stats(){
+  var eq=document.getElementById('eq'),dl=document.getElementById('stats');dl.innerHTML='';
+  if(pts.length<2){eq.textContent='Add at least 2 points';return}
+  if(fit.vertical){eq.textContent='All x values are the same, so no line can be fitted.';return}
+  var sign=fit.b<0?'−':'+';
+  eq.textContent='y = '+fmt(fit.m,4)+'x '+sign+' '+fmt(Math.abs(fit.b),4);
+  [['Slope',fmt(fit.m)],['Intercept',fmt(fit.b)],['R²',fmt(fit.r2,4)],['Correlation r',fmt(fit.r,4)],['Residual std. error',fmt(fit.se,4)],['Points',fit.n]].forEach(function(r){
+    var a=document.createElement('dt'),b=document.createElement('dd');a.textContent=r[0];b.textContent=r[1];dl.appendChild(a);dl.appendChild(b);
+  });
+}
+function predict(){
+  var out=document.getElementById('pout'),x=parseFloat(document.getElementById('px').value);
+  if(!fit||fit.vertical){out.textContent='Fit a line first: add at least 2 points with different x values.';return}
+  if(!isFinite(x)){out.textContent='Enter a number for x.';return}
+  var note=(x<Math.min.apply(0,pts.map(function(p){return p.x}))||x>Math.max.apply(0,pts.map(function(p){return p.x})))?' This x is outside your data range, so treat it as an extrapolation.':'';
+  out.textContent='At x = '+fmt(x)+', predicted y = '+fmt(fit.m*x+fit.b)+'.'+note;
+}
+function update(){parse();regress();stats();draw();predict()}
+ta.addEventListener('input',update);
+document.getElementById('resid').addEventListener('change',draw);
+document.getElementById('pbtn').addEventListener('click',predict);
+document.getElementById('px').addEventListener('input',predict);
+document.getElementById('clear').addEventListener('click',function(){ta.value='';document.getElementById('px').value='';update()});
+document.getElementById('sample').addEventListener('click',function(){
+  ta.value='1, 2.3\n2, 4.1\n3, 5.8\n4, 8.4\n5, 9.7\n6, 12.5\n7, 13.8\n8, 16.4';update();
+});
+svg.addEventListener('click',function(e){
+  var pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
+  var q=pt.matrixTransform(svg.getScreenCTM().inverse());
+  if(q.x<M.l||q.x>W-M.r||q.y<M.t||q.y>H-M.b)return;
+  var X=view.X,Y=view.Y;
+  var x=X.lo+(q.x-M.l)/(W-M.l-M.r)*(X.hi-X.lo),y=Y.lo+(H-M.b-q.y)/(H-M.t-M.b)*(Y.hi-Y.lo);
+  var d=Math.max(0,-Math.floor(Math.log10(X.step))+1),d2=Math.max(0,-Math.floor(Math.log10(Y.step))+1);
+  ta.value=(ta.value.trim()?ta.value.replace(/\s+$/,'')+'\n':'')+x.toFixed(d)+', '+y.toFixed(d2);
+  update();
+});
+ta.value='1, 2.3\n2, 4.1\n3, 5.8\n4, 8.4\n5, 9.7\n6, 12.5\n7, 13.8\n8, 16.4';
+update();
+})();
+</script>
+</body>
+</html>
